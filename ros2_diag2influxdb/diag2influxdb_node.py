@@ -77,7 +77,7 @@ class Diag2InfluxdbNode(Node):
 
         self.messages = []
 
-    def return_val(s):
+    def return_val(self, s):
         try:
             return int(s)
         except ValueError:
@@ -91,10 +91,14 @@ class Diag2InfluxdbNode(Node):
         return s
 
     def listener_callback(self, val):
+        self.get_logger().debug("received message: %s" % val)
+
         for status in val.status:
             message = {
                 "measurement": self.measurement,
-                "fields": {status.items()},
+                "fields": {
+                    item.key: self.return_val(item.value) for item in status.values
+                },
                 # "time": time.time() * 1000 * 1000000,
             }
             self.messages.append(message)
