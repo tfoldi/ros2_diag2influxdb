@@ -46,6 +46,7 @@ class Diag2InfluxdbNode(Node):
         self.declare_parameter("influx_url", "http://influxdb:8086")
         self.declare_parameter("influx_org_id", "")
         self.declare_parameter("influx_measurement", "diagnostics")
+        self.declare_parameter("influx_message_queue", 2_000)
 
         qos_history = (
             self.get_parameter("qos_history").get_parameter_value().integer_value
@@ -69,6 +70,11 @@ class Diag2InfluxdbNode(Node):
         )
         self.measurement = (
             self.get_parameter("influx_measurement").get_parameter_value().string_value
+        )
+        self.influx_message_queue = (
+            self.get_parameter("influx_message_queue")
+            .get_parameter_value()
+            .integer_value
         )
 
         self.influx_client = InfluxDBClient(
@@ -103,20 +109,23 @@ class Diag2InfluxdbNode(Node):
             }
             self.messages.append(message)
 
-        if len(self.messages) > 2000:
-            with self.influx_client.write_api(
-                write_options=WriteOptions(
-                    batch_size=2000,
-                    flush_interval=1000,
-                    jitter_interval=0,
-                    retry_interval=5_000,
-                    max_retries=0,
-                )
-            ) as _write_client:
-                _write_client.write(
-                    self.influx_bucket, self.org_id, record=self.messages
-                )
-                self.messages = []
+        if len(self.messages) > self.influx_message_queue:
+            self.write_to_influx()
+
+    def write_to_influx(self):
+        self.get_logger().debug("Writing %d messages to InfluxDB" % len(self.messages))
+
+        with self.influx_client.write_api(
+            write_options=WriteOptions(
+                batch_size=2000,
+                flush_interval=1000,
+                jitter_interval=0,
+                retry_interval=5_000,
+                max_retries=0,
+            )
+        ) as _write_client:
+            _write_client.write(self.influx_bucket, self.org_id, record=self.messages)
+            self.messages = []
 
 
 def main(args=None):
