@@ -26,10 +26,9 @@ import rclpy
 
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
+from rclpy.qos_overriding_options import QoSOverridingOptions
 
 from diagnostic_msgs.msg import DiagnosticArray
-from diagnostic_msgs.msg import DiagnosticStatus
-from diagnostic_msgs.msg import KeyValue
 
 from influxdb_client import InfluxDBClient, WriteOptions
 
@@ -38,9 +37,6 @@ class Diag2InfluxdbNode(Node):
     def __init__(self):
         super().__init__("diag2influxdb_node")
 
-        qos_history_desc = ParameterDescriptor(description="QoS history depth")
-        self.declare_parameter("qos_history", 100, qos_history_desc)
-
         self.declare_parameter("influx_bucket", "default")
         self.declare_parameter("influx_token", "")
         self.declare_parameter("influx_url", "http://influxdb:8086")
@@ -48,15 +44,12 @@ class Diag2InfluxdbNode(Node):
         self.declare_parameter("influx_measurement", "diagnostics")
         self.declare_parameter("influx_message_queue", 2_000)
 
-        qos_history = (
-            self.get_parameter("qos_history").get_parameter_value().integer_value
-        )
-
         self.subscription = self.create_subscription(
             DiagnosticArray,
             "/diagnostics",
             self.listener_callback,
-            qos_history,
+            rclpy.qos.qos_profile_sensor_data,
+            qos_overriding_options=QoSOverridingOptions.with_default_policies(),
         )
         self.subscription  # prevent unused variable warning
 
