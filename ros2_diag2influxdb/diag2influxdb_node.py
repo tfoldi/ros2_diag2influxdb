@@ -22,13 +22,14 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from collections import deque
-import rclpy
+from collections import deque, defaultdict
+import numpy as np
 
+import rclpy
 from rclpy.node import Node
+from rclpy.qos_overriding_options import QoSOverridingOptions
 
 # from rcl_interfaces.msg import ParameterDescriptor
-from rclpy.qos_overriding_options import QoSOverridingOptions
 
 from diagnostic_msgs.msg import DiagnosticArray
 
@@ -82,6 +83,7 @@ class Diag2InfluxdbNode(Node):
         self.use_current_time = (
             self.get_parameter("use_current_time").get_parameter_value().bool_value
         )
+        self.coalesce = self.get_parameter("coalesce").get_parameter_value().bool_value
 
         self.influx_client = InfluxDBClient(
             url=influx_url, token=token, org=self.org_id, debug=False
@@ -113,8 +115,6 @@ class Diag2InfluxdbNode(Node):
             self.write_to_influx()
 
     def listener_callback(self, val):
-        self.get_logger().debug("received message: %s" % val)
-
         for status in val.status:
             message = {
                 "measurement": self.measurement,
@@ -138,6 +138,9 @@ class Diag2InfluxdbNode(Node):
         for _ in range(len(self.messages)):
             message_buffer.append(self.messages.popleft())
 
+        if self.coalesce:
+            message_buffer = self.aggregate_messages(message_buffer, method="mean")
+
         with self.influx_client.write_api(
             write_options=WriteOptions(
                 batch_size=2000,
@@ -148,6 +151,38 @@ class Diag2InfluxdbNode(Node):
             )
         ) as _write_client:
             _write_client.write(self.influx_bucket, self.org_id, record=message_buffer)
+
+    def aggregate_messages(self, messages, method="last"):
+        # Check if messages list is empty
+        if not messages:
+            return []
+
+        # Initialize a dictionary to hold the aggregated data
+        aggregated_data = {
+            "measurement": messages[0]["measurement"],
+            "tags": {},  # unless we aggregate
+            "fields": defaultdict(list),
+            "time": messages[-1]["time"],
+        }
+
+        # Accumulate the field values
+        for message in messages:
+            for field, value in message["fields"].items():
+                aggregated_data["fields"][field].append(value)
+
+        # Aggregate the field values
+        for field, values in aggregated_data["fields"].items():
+            if method == "last":
+                aggregated_data["fields"][field] = values[-1]  # Use the last value
+            elif method == "mean":
+                aggregated_data["fields"][field] = np.mean(values)  # Compute the mean
+
+        # Convert fields from defaultdict to dict for final output
+        aggregated_data["fields"] = dict(aggregated_data["fields"])
+
+        self.get_logger().debug("Aggregated data: %s" % aggregated_data)
+
+        return [aggregated_data]
 
 
 def main(args=None):
