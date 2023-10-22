@@ -110,7 +110,9 @@ class Diag2InfluxdbNode(Node):
         return s
 
     def timer_callback(self):
-        self.get_logger().debug("Timer callback, flushing messages")
+        self.get_logger().debug(
+            "[Timer] flushing messages. Number of messages: %d" % len(self.messages)
+        )
         if len(self.messages) > 0:
             self.write_to_influx()
 
@@ -157,28 +159,40 @@ class Diag2InfluxdbNode(Node):
         if not messages:
             return []
 
-        # Initialize a dictionary to hold the aggregated data
-        aggregated_data = {
-            "measurement": messages[0]["measurement"],
-            "tags": {},  # unless we aggregate
-            "fields": defaultdict(list),
-            "time": messages[-1]["time"],
-        }
+        last_time = messages[-1]["time"]
 
-        # Accumulate the field values
+        # Initialize a dictionary to hold the groups
+        groups = defaultdict(
+            lambda: {
+                "measurement": "",
+                "tags": {},
+                "fields": defaultdict(list),
+                "time": 0,
+            }
+        )
+
+        # Group the messages by tag combinations
         for message in messages:
+            tags_tuple = tuple(
+                sorted(message["tags"].items())
+            )  # Convert tags dict to a sortable tuple
+            group = groups[tags_tuple]
+            group["measurement"] = message["measurement"]
+            group["tags"] = message["tags"]
+            group["time"] = last_time
             for field, value in message["fields"].items():
-                aggregated_data["fields"][field].append(value)
+                group["fields"][field].append(value)
 
-        # Aggregate the field values
-        for field, values in aggregated_data["fields"].items():
-            if method == "last":
-                aggregated_data["fields"][field] = values[-1]  # Use the last value
-            elif method == "mean":
-                aggregated_data["fields"][field] = np.mean(values)  # Compute the mean
-
-        # Convert fields from defaultdict to dict for final output
-        aggregated_data["fields"] = dict(aggregated_data["fields"])
+        # Aggregate the field values within each group
+        aggregated_data = []
+        for tags_tuple, group in groups.items():
+            for field, values in group["fields"].items():
+                if method == "last":
+                    group["fields"][field] = values[-1]  # Use the last value
+                elif method == "mean":
+                    group["fields"][field] = np.mean(values)  # Compute the mean
+            group["fields"] = dict(group["fields"])
+            aggregated_data.append(group)
 
         self.get_logger().debug("Aggregated data: %s" % aggregated_data)
 
