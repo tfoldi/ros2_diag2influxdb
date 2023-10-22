@@ -25,7 +25,7 @@
 import rclpy
 
 from rclpy.node import Node
-from rcl_interfaces.msg import ParameterDescriptor
+# from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.qos_overriding_options import QoSOverridingOptions
 
 from diagnostic_msgs.msg import DiagnosticArray
