@@ -22,9 +22,11 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from collections import deque
 import rclpy
 
 from rclpy.node import Node
+
 # from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.qos_overriding_options import QoSOverridingOptions
 
@@ -42,7 +44,10 @@ class Diag2InfluxdbNode(Node):
         self.declare_parameter("influx_url", "http://influxdb:8086")
         self.declare_parameter("influx_org_id", "")
         self.declare_parameter("influx_measurement", "diagnostics")
-        self.declare_parameter("influx_message_queue", 2_000)
+        self.declare_parameter("influx_message_queue", 5_000)
+        self.declare_parameter("influx_push_timer_period", 5.0)
+        self.declare_parameter("use_current_time", False)
+        self.declare_parameter("coalesce", False)
 
         self.subscription = self.create_subscription(
             DiagnosticArray,
@@ -69,12 +74,25 @@ class Diag2InfluxdbNode(Node):
             .get_parameter_value()
             .integer_value
         )
+        influx_push_timer_period = (
+            self.get_parameter("influx_push_timer_period")
+            .get_parameter_value()
+            .double_value
+        )
+        self.use_current_time = (
+            self.get_parameter("use_current_time").get_parameter_value().bool_value
+        )
 
         self.influx_client = InfluxDBClient(
             url=influx_url, token=token, org=self.org_id, debug=False
         )
 
-        self.messages = []
+        self.get_logger().info(
+            "Influxdb initalized with time period: %s" % influx_push_timer_period
+        )
+        self.timer = self.create_timer(influx_push_timer_period, self.timer_callback)
+
+        self.messages = deque()
 
     def return_val(self, s):
         try:
@@ -89,16 +107,24 @@ class Diag2InfluxdbNode(Node):
 
         return s
 
+    def timer_callback(self):
+        self.get_logger().debug("Timer callback, flushing messages")
+        if len(self.messages) > 0:
+            self.write_to_influx()
+
     def listener_callback(self, val):
         self.get_logger().debug("received message: %s" % val)
 
         for status in val.status:
             message = {
                 "measurement": self.measurement,
+                "tags": {"name": status.name, "id": status.hardware_id},
                 "fields": {
                     item.key: self.return_val(item.value) for item in status.values
                 },
-                # "time": time.time() * 1000 * 1000000,
+                "time": self.get_clock().now().nanoseconds
+                if self.use_current_time
+                else status.header.stamp.nanoseconds,
             }
             self.messages.append(message)
 
@@ -107,6 +133,10 @@ class Diag2InfluxdbNode(Node):
 
     def write_to_influx(self):
         self.get_logger().debug("Writing %d messages to InfluxDB" % len(self.messages))
+
+        message_buffer = []
+        for _ in range(len(self.messages)):
+            message_buffer.append(self.messages.popleft())
 
         with self.influx_client.write_api(
             write_options=WriteOptions(
@@ -117,8 +147,7 @@ class Diag2InfluxdbNode(Node):
                 max_retries=0,
             )
         ) as _write_client:
-            _write_client.write(self.influx_bucket, self.org_id, record=self.messages)
-            self.messages = []
+            _write_client.write(self.influx_bucket, self.org_id, record=message_buffer)
 
 
 def main(args=None):
