@@ -1,0 +1,12 @@
+diag2influxdb_node:
+  ros__parameters:
+    influx_bucket: "default"
+    influx_org_id: ""
+    influx_measurement: "rcanbus"
+    influx_url: "influxdb2"
+    influx_token: ""
+    log_level: "debug"
+    influx_message_queue: 10000
+    influx_push_timer_period: 5.0
+    use_current_time: true
+    coalesce: false
