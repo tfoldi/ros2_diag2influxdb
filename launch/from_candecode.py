@@ -22,6 +22,7 @@ def generate_launch_description():
                 name="candecode_node",
                 output="log",
                 parameters=[decode_config_file],
+                arguments=['--ros-args', '--log-level', 'debug']
             ),
             Node(
                 package="ros2_diag2influxdb",
@@ -29,6 +30,7 @@ def generate_launch_description():
                 name="diag2influxdb_node",
                 output="log",
                 parameters=[antares_config_file],
+                arguments=['--ros-args', '--log-level', 'debug']
             )
         ]
     )
